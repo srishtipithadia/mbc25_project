@@ -2,6 +2,7 @@
 
 ## Table of Contents
 
+- [Repository Structure](#repository-structure)
 - [Prerequisites](#prerequisites)
 - [Setup Instructions](#setup-instructions)
   - [Step 1: Clone the Repository](#step-1-clone-the-repository)
@@ -13,6 +14,38 @@
   - [Step 7: Configure Frontend Environment Variables](#step-7-configure-frontend-environment-variables)
   - [Step 8: Run Development Server](#step-8-run-development-server)
 - [Quick Start Summary](#quick-start-summary)
+
+## Repository Structure
+
+```
+mbc25_project/
+├── contracts/              # Smart contracts
+│   └── ClubTreasuryUSDC.sol    # Main treasury contract
+├── scripts/                # Deployment scripts
+│   └── deploy.js               # Contract deployment script
+├── artifacts/              # Compiled contract artifacts (generated)
+│   └── contracts/
+│       └── ClubTreasuryUSDC.sol/
+├── cache/                 # Hardhat cache (generated)
+├── frontend/              # React frontend application
+│   ├── src/
+│   │   ├── abi/              # Contract ABIs
+│   │   │   └── ClubTreasuryUSDC.ts
+│   │   ├── assets/            # Images and static assets
+│   │   │   ├── poolparty-logo-only.png
+│   │   │   └── poolparty-logo-name.png
+│   │   ├── App.tsx             # Main application component
+│   │   ├── main.tsx             # Application entry point
+│   │   └── index.css            # Global styles
+│   ├── public/                 # Public assets
+│   ├── index.html              # HTML template
+│   ├── package.json            # Frontend dependencies
+│   ├── vite.config.ts          # Vite configuration
+│   └── tsconfig.json            # TypeScript configuration
+├── hardhat.config.js       # Hardhat configuration
+├── package.json            # Root dependencies
+└── README.md               # This file
+```
 
 ## Prerequisites
 
