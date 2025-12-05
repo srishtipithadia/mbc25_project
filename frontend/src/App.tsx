@@ -1,9 +1,23 @@
 // src/App.tsx
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount } from "wagmi";
-import poolpartyLogo from "./assets/poolparty-logo-only.png";
+import {
+  useAccount,
+  useReadContract,
+  useWriteContract,
+} from "wagmi";
+import { waitForTransactionReceipt } from "@wagmi/core";
+import { formatUnits, parseUnits } from "viem";
 
+import poolpartyLogo from "./assets/poolparty-logo-only.png";
+import {
+  CLUB_TREASURY_ABI,
+  CLUB_TREASURY_ADDRESS,
+  USDC_ADDRESS,
+} from "./abi/ClubTreasuryUSDC";
+import { wagmiConfig } from "./wagmiConfig";
+
+// ---- Types ----
 type Proposal = {
   id: number;
   title: string;
@@ -18,8 +32,6 @@ type Proposal = {
 type AttendanceSession = {
   id: number;
   label: string;
-  code: string;
-  attendees: string[];
 };
 
 // ---- Theme colors ----
@@ -33,8 +45,7 @@ const COLORS = {
   yellowDeep: "#C76C05",
 };
 
-const INITIAL_TREASURY_BALANCE = 2500.5;
-
+// Mock initial data for proposals / attendance list
 const INITIAL_PROPOSALS: Proposal[] = [
   {
     id: 1,
@@ -59,14 +70,24 @@ const INITIAL_PROPOSALS: Proposal[] = [
 ];
 
 const INITIAL_ATTENDANCE_SESSIONS: AttendanceSession[] = [
-  {
-    id: 1,
-    label: "General Meeting 1",
-    code: "MBC-1234",
-    attendees: [],
-  },
+  { id: 1, label: "Event #1 (on-chain check-in)" },
 ];
 
+// Minimal ERC20 ABI for approve()
+const ERC20_ABI = [
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+] as const;
+
+// Helpers
 function formatUSDC(amount: number) {
   return amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -76,18 +97,15 @@ function formatUSDC(amount: number) {
 
 export default function App() {
   const { address, isConnected } = useAccount();
-  const [treasuryBalance, setTreasuryBalance] = useState(
-    INITIAL_TREASURY_BALANCE
-  );
   const [proposals, setProposals] = useState<Proposal[]>(INITIAL_PROPOSALS);
-  const [attendanceSessions, setAttendanceSessions] = useState<
-    AttendanceSession[]
-  >(INITIAL_ATTENDANCE_SESSIONS);
+  const [attendanceSessions] =
+    useState<AttendanceSession[]>(INITIAL_ATTENDANCE_SESSIONS);
 
   return (
     <div
       style={{
         minHeight: "100vh",
+        width: "100vw",
         padding: "1.5rem 1.5rem 3rem",
         background: COLORS.background,
         color: COLORS.navy,
@@ -104,6 +122,7 @@ export default function App() {
           gap: "1.5rem",
           marginBottom: "1.75rem",
           flexWrap: "wrap",
+          width: "92vw",
         }}
       >
         {/* Left: logo + title + nav */}
@@ -111,14 +130,14 @@ export default function App() {
           <img
             src={poolpartyLogo}
             alt="PoolParty Logo"
-            style={{ width: 80, height: 80 }}
+            style={{ width: 96, height: 96 }}
           />
 
           <div>
             <h1
               style={{
                 margin: 0,
-                fontSize: "2.2rem",
+                fontSize: "2.4rem",
                 fontWeight: 800,
                 letterSpacing: "-0.04em",
                 color: COLORS.navy,
@@ -134,8 +153,7 @@ export default function App() {
                 color: COLORS.mutedNavy,
               }}
             >
-              Club funding, voting, and attendance — powered by USDC on Base (mock
-              demo)
+              Club funding, voting, and attendance — powered by USDC on Base
             </p>
 
             {/* Nav under the title */}
@@ -161,6 +179,9 @@ export default function App() {
               <a href="#vote" style={navLinkStyle}>
                 Vote
               </a>
+              <a href="#attendance" style={navLinkStyle}>
+                Attendance
+              </a>
             </nav>
           </div>
         </div>
@@ -173,8 +194,9 @@ export default function App() {
 
       {!isConnected && (
         <p style={{ color: COLORS.mutedNavy, fontSize: "0.95rem" }}>
-          Connect your wallet to explore the PoolParty prototype. All values are
-          mocked for hackathon demo purposes.
+          Connect your wallet on <strong>Base Sepolia</strong> to interact with
+          the live PoolParty contract. You’ll see deposits and attendance
+          check-ins on the block explorer.
         </p>
       )}
 
@@ -188,17 +210,13 @@ export default function App() {
           }}
         >
           <AboutSection />
-          <TreasurySection
-            treasuryBalance={treasuryBalance}
-            setTreasuryBalance={setTreasuryBalance}
-          />
+          <TreasurySection />
           <ProposalsSection
             proposals={proposals}
             setProposals={setProposals}
           />
           <AttendanceSection
             sessions={attendanceSessions}
-            setSessions={setAttendanceSessions}
             currentAddress={address ?? ""}
           />
         </main>
@@ -213,11 +231,9 @@ export default function App() {
           }}
         >
           Connected as{" "}
-            <span style={{ fontFamily: "monospace", color: COLORS.navy }}>
-              {address?.slice(0, 6)}…{address?.slice(-4)}
-            </span>
-          {" • "}
-          All data is mock only (no real USDC moved).
+          <span style={{ fontFamily: "monospace", color: COLORS.navy }}>
+            {address?.slice(0, 6)}…{address?.slice(-4)}
+          </span>
         </footer>
       )}
     </div>
@@ -230,48 +246,146 @@ function AboutSection() {
     <section style={cardStyle} id="about">
       <h2 style={cardTitleStyle}>About PoolParty</h2>
       <p style={bodyTextStyle}>
-        PoolParty is a mini treasury app for student clubs and communities. All
-        funds sit in a shared USDC pool on Base, and members vote on how those
-        funds are allocated. Attendance is tracked with on-chain codes so voting
-        power can reflect real participation.{" "}
-        <strong>This demo uses mock data only</strong> but mirrors the full
-        on-chain flow: deposit → propose → vote → execute.
+        PoolParty is a treasury app for student clubs and communities. All funds
+        sit in a shared USDC pool on Base, and members vote on how those funds
+        are allocated. Attendance can be logged on-chain so voting power can
+        reflect real participation.
       </p>
     </section>
   );
 }
 
-// ---- Treasury ----
-function TreasurySection(props: {
-  treasuryBalance: number;
-  setTreasuryBalance: (v: number) => void;
-}) {
-  const { treasuryBalance, setTreasuryBalance } = props;
-  const [mockDeposit, setMockDeposit] = useState("");
+// ---- Treasury (REAL on-chain) ----
+function TreasurySection() {
+  const { address } = useAccount();
+  const { writeContractAsync } = useWriteContract();
 
-  function handleMockDeposit(e: React.FormEvent) {
+  // Read treasury balance from contract
+  const {
+    data: onchainBalance,
+    isLoading,
+    isError,
+    refetch,
+  } = useReadContract({
+    address: CLUB_TREASURY_ADDRESS,
+    abi: CLUB_TREASURY_ABI,
+    functionName: "treasuryBalanceUSDC",
+    query: {
+      refetchInterval: 15000, // auto-refresh every 15s
+    },
+  });
+
+  const [amountInput, setAmountInput] = useState("");
+  const [status, setStatus] = useState<
+    "idle" | "approving" | "depositing" | "success" | "error"
+  >("idle");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [lastTxHash, setLastTxHash] = useState<`0x${string}` | null>(null);
+
+  const displayBalance = useMemo(() => {
+    if (!onchainBalance || typeof onchainBalance !== "bigint") return 0;
+    // USDC has 6 decimals
+    const formatted = formatUnits(onchainBalance as bigint, 6);
+    return Number(formatted);
+  }, [onchainBalance]);
+
+  async function handleDeposit(e: React.FormEvent) {
     e.preventDefault();
-    const val = Number(mockDeposit);
-    if (!val || val <= 0) return;
-    setTreasuryBalance(treasuryBalance + val);
-    setMockDeposit("");
+    if (!address) return;
+    if (!amountInput || Number(amountInput) <= 0) return;
+
+    setStatus("idle");
+    setStatusMessage(null);
+    setLastTxHash(null);
+
+    try {
+      const amountBig = parseUnits(amountInput, 6); // USDC 6 decimals
+
+      // 1) Approve the treasury contract to spend USDC
+      setStatus("approving");
+      setStatusMessage("1/2: Approving USDC spend…");
+      const approveHash = await writeContractAsync({
+        address: USDC_ADDRESS,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [CLUB_TREASURY_ADDRESS, amountBig],
+      });
+
+      await waitForTransactionReceipt(wagmiConfig, {
+        hash: approveHash,
+      });
+
+      // 2) Call depositUSDC on the treasury contract
+      setStatus("depositing");
+      setStatusMessage("2/2: Depositing into PoolParty treasury…");
+      const depositHash = await writeContractAsync({
+        address: CLUB_TREASURY_ADDRESS,
+        abi: CLUB_TREASURY_ABI,
+        functionName: "depositUSDC",
+        args: [amountBig],
+      });
+
+      await waitForTransactionReceipt(wagmiConfig, {
+        hash: depositHash,
+      });
+
+      setLastTxHash(depositHash);
+      setStatus("success");
+      setStatusMessage("Deposit completed! Refreshing balance…");
+      setAmountInput("");
+      await refetch();
+    } catch (err: any) {
+      console.error("Deposit error", err);
+      setStatus("error");
+      setStatusMessage(
+        err?.shortMessage ||
+          err?.message ||
+          "Transaction failed or was rejected."
+      );
+    }
   }
 
   return (
     <section style={cardStyle}>
-      <h2 style={cardTitleStyle}>Treasury Balance</h2>
+      <h2 style={cardTitleStyle}>Treasury Balance (on-chain)</h2>
 
-      <p style={{ fontSize: "1.7rem", fontWeight: 800, marginTop: "0.25rem" }}>
-        {formatUSDC(treasuryBalance)} USDC
-      </p>
+      {isLoading && (
+        <p style={smallTextStyle}>Loading treasury balance from Base…</p>
+      )}
+
+      {!isLoading && !isError && (
+        <p
+          style={{
+            fontSize: "1.7rem",
+            fontWeight: 800,
+            marginTop: "0.25rem",
+          }}
+        >
+          {formatUSDC(displayBalance)} USDC
+        </p>
+      )}
+
+      {isError && (
+        <p
+          style={{
+            ...smallTextStyle,
+            color: "#B91C1C",
+            marginTop: "0.3rem",
+          }}
+        >
+          Error reading on-chain contract balance.
+        </p>
+      )}
 
       <p style={smallTextStyle}>
-        In a real deployment, this would read from the on-chain contract on
-        Base. For the hackathon demo, we simulate deposits below.
+        When you deposit here, you will see a USDC <code>approve</code> and a{" "}
+        <code>depositUSDC</code> transaction for{" "}
+        <code>{CLUB_TREASURY_ADDRESS}</code> on{" "}
+        <strong>Base Sepolia</strong>.
       </p>
 
       <form
-        onSubmit={handleMockDeposit}
+        onSubmit={handleDeposit}
         style={{
           marginTop: "0.75rem",
           display: "flex",
@@ -283,20 +397,58 @@ function TreasurySection(props: {
           type="number"
           min="0"
           step="0.01"
-          placeholder="Fake deposit (USDC)"
-          value={mockDeposit}
-          onChange={(e) => setMockDeposit(e.target.value)}
+          placeholder="Amount to deposit (USDC)"
+          value={amountInput}
+          onChange={(e) => setAmountInput(e.target.value)}
           style={inputStyle}
         />
-        <button type="submit" style={primaryButtonStyle}>
-          Simulate Deposit
+        <button
+          type="submit"
+          style={primaryButtonStyle}
+          disabled={status === "approving" || status === "depositing"}
+        >
+          {status === "approving"
+            ? "Approving…"
+            : status === "depositing"
+            ? "Depositing…"
+            : "Deposit to Treasury"}
         </button>
       </form>
+
+      {status !== "idle" && statusMessage && (
+        <p
+          style={{
+            ...smallTextStyle,
+            marginTop: "0.5rem",
+            color:
+              status === "success"
+                ? "#16A34A"
+                : status === "error"
+                ? "#B91C1C"
+                : COLORS.mutedNavy,
+          }}
+        >
+          {statusMessage}
+        </p>
+      )}
+
+      {lastTxHash && (
+        <p style={{ ...smallTextStyle, marginTop: "0.3rem" }}>
+          View on BaseScan:{" "}
+          <a
+            href={`https://sepolia.basescan.org/tx/${lastTxHash}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {lastTxHash.slice(0, 10)}…{lastTxHash.slice(-6)}
+          </a>
+        </p>
+      )}
     </section>
   );
 }
 
-// ---- Proposals ----
+// ---- Proposals (still mock, local state) ----
 function ProposalsSection(props: {
   proposals: Proposal[];
   setProposals: (p: Proposal[]) => void;
@@ -318,7 +470,7 @@ function ProposalsSection(props: {
       amountUSDC: Number(amount),
       yes: 0,
       no: 0,
-      deadline: "TBD (mock)",
+      deadline: "TBD (off-chain mock)",
       executed: false,
     };
     setProposals([...proposals, newProposal]);
@@ -345,7 +497,7 @@ function ProposalsSection(props: {
     <section style={cardStyle}>
       {/* Create proposal */}
       <div id="create-proposal">
-        <h2 style={cardTitleStyle}>Create Proposal</h2>
+        <h2 style={cardTitleStyle}>Create Proposal (mock)</h2>
 
         <form
           onSubmit={handleCreateProposal}
@@ -375,7 +527,7 @@ function ProposalsSection(props: {
             style={inputStyle}
           />
           <button type="submit" style={primaryButtonStyle}>
-            Create Proposal (mock)
+            Create Proposal (off-chain mock)
           </button>
         </form>
       </div>
@@ -409,7 +561,7 @@ function ProposalsSection(props: {
               style={{
                 padding: "0.9rem 1rem",
                 borderRadius: "0.7rem",
-                background: "#FAFBFF",
+                background: COLORS.lightBlue,
                 border: `2px solid ${COLORS.navy}`,
               }}
             >
@@ -503,127 +655,175 @@ function ProposalsSection(props: {
   );
 }
 
-// ---- Attendance ----
+// ---- Attendance (REAL checkIn call) ----
 function AttendanceSection(props: {
   sessions: AttendanceSession[];
-  setSessions: (s: AttendanceSession[]) => void;
   currentAddress: string;
 }) {
-  const { sessions, setSessions, currentAddress } = props;
+  const { sessions, currentAddress } = props;
+  const { writeContractAsync } = useWriteContract();
+
+  const [eventId, setEventId] = useState("1");
+  const [code, setCode] = useState("");
+  const [salt, setSalt] = useState(
+    "0x0000000000000000000000000000000000000000000000000000000000000001"
+  );
+  const [status, setStatus] = useState<
+    "idle" | "pending" | "success" | "error"
+  >("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
 
   const activeSession = sessions[sessions.length - 1];
-  const [inputCode, setInputCode] = useState("");
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
-  const [message, setMessage] = useState("");
 
-  function handleSubmitAttendance(e: React.FormEvent) {
+  async function handleCheckIn(e: React.FormEvent) {
     e.preventDefault();
-    if (!activeSession) return;
-    if (inputCode.trim() !== activeSession.code) {
-      setStatus("error");
-      setMessage("Invalid code for this session.");
-      return;
-    }
-    if (activeSession.attendees.includes(currentAddress)) {
-      setStatus("error");
-      setMessage("You already checked in for this session.");
-      return;
-    }
+    setStatus("idle");
+    setMessage(null);
+    setTxHash(null);
 
-    const updatedSessions = sessions.map((s) =>
-      s.id === activeSession.id
-        ? { ...s, attendees: [...s.attendees, currentAddress] }
-        : s
-    );
+    try {
+      if (!eventId || !code || !salt) {
+        setStatus("error");
+        setMessage("Please fill in event ID, code, and salt.");
+        return;
+      }
 
-    setSessions(updatedSessions);
-    setInputCode("");
-    setStatus("success");
-    setMessage("Attendance recorded (mock).");
+      setStatus("pending");
+      setMessage("Submitting on-chain attendance…");
+
+      const hash = await writeContractAsync({
+        address: CLUB_TREASURY_ADDRESS,
+        abi: CLUB_TREASURY_ABI,
+        functionName: "checkIn",
+        args: [BigInt(eventId), code, salt as `0x${string}`],
+      });
+
+      await waitForTransactionReceipt(wagmiConfig, { hash });
+
+      setStatus("success");
+      setTxHash(hash);
+      setMessage("Attendance recorded on-chain!");
+      setCode("");
+    } catch (err: any) {
+      console.error("checkIn error", err);
+      setStatus("error");
+      setMessage(
+        err?.shortMessage ||
+          err?.message ||
+          "checkIn failed (are you a member, and is the code/salt correct?)."
+      );
+    }
   }
 
   return (
-    <section style={cardStyle}>
-      <h2 style={cardTitleStyle}>Attendance</h2>
+    <section style={cardStyle} id="attendance">
+      <h2 style={cardTitleStyle}>Attendance (on-chain)</h2>
 
-      {!activeSession && (
+      <ul
+        style={{
+          marginTop: "0.4rem",
+          marginBottom: "0.8rem",
+          paddingLeft: "1.2rem",
+          fontSize: "0.9rem",
+          color: COLORS.mutedNavy,
+        }}
+      >
+        <li>Your connected address must be a <strong>member</strong>.</li>
+        <li>
+          The event with that ID must already exist on-chain with a matching
+          <code> attendanceCodeHash</code>.
+        </li>
+      </ul>
+
+      {activeSession && (
         <p style={smallTextStyle}>
-          No active attendance session. Admins would normally create a new
-          session and on-chain code; here we use a mock code.
+          Example label: <strong>{activeSession.label}</strong>
         </p>
       )}
 
-      {activeSession && (
-        <>
-          <p style={bodyTextStyle}>
-            Current session:{" "}
-            <span style={{ fontWeight: 600 }}>{activeSession.label}</span>
-          </p>
-          <p style={smallTextStyle}>
-            Event code (shared by admins):{" "}
-            <span
-              style={{
-                fontFamily: "monospace",
-                padding: "0.1rem 0.4rem",
-                borderRadius: "0.3rem",
-                background: COLORS.lightBlue,
-                border: `2px solid ${COLORS.navy}`,
-              }}
-            >
-              {activeSession.code}
-            </span>
-          </p>
+      <form
+        onSubmit={handleCheckIn}
+        style={{ display: "grid", gap: "0.7rem", marginTop: "0.75rem" }}
+      >
+        <input
+          type="number"
+          min="1"
+          step="1"
+          placeholder="Event ID (e.g. 1)"
+          value={eventId}
+          onChange={(e) => setEventId(e.target.value)}
+          style={inputStyle}
+        />
+        <input
+          type="text"
+          placeholder="Attendance code (human code used when hashing)"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          style={inputStyle}
+        />
+        <input
+          type="text"
+          placeholder="Salt used when hashing (bytes32)"
+          value={salt}
+          onChange={(e) => setSalt(e.target.value)}
+          style={inputStyle}
+        />
+        <button
+          type="submit"
+          style={primaryButtonStyle}
+          disabled={status === "pending"}
+        >
+          {status === "pending" ? "Submitting…" : "Check In On-Chain"}
+        </button>
+      </form>
 
-          <form
-            onSubmit={handleSubmitAttendance}
-            style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}
-          >
-            <input
-              type="text"
-              placeholder="Enter attendance code"
-              value={inputCode}
-              onChange={(e) => setInputCode(e.target.value)}
-              style={{ ...inputStyle, flex: 1, minWidth: 180 }}
-            />
-            <button type="submit" style={primaryButtonStyle}>
-              Submit Attendance (mock)
-            </button>
-          </form>
-
-          {status !== "idle" && (
-            <p
-              style={{
-                marginTop: "0.5rem",
-                fontSize: "0.85rem",
-                color: status === "success" ? "#16A34A" : "#DC2626",
-              }}
-            >
-              {message}
-            </p>
-          )}
-
-          <div style={{ marginTop: "1rem", fontSize: "0.85rem" }}>
-            <strong>Attendees ({activeSession.attendees.length}):</strong>
-            {activeSession.attendees.length === 0 && (
-              <span style={{ color: COLORS.mutedNavy }}> none yet</span>
-            )}
-            {activeSession.attendees.length > 0 && (
-              <ul
-                style={{
-                  marginTop: "0.4rem",
-                  paddingLeft: "1.2rem",
-                }}
-              >
-                {activeSession.attendees.map((a) => (
-                  <li key={a} style={{ fontFamily: "monospace" }}>
-                    {a.slice(0, 6)}…{a.slice(-4)}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </>
+      {status !== "idle" && message && (
+        <p
+          style={{
+            ...smallTextStyle,
+            marginTop: "0.5rem",
+            color:
+              status === "success"
+                ? "#16A34A"
+                : status === "error"
+                ? "#B91C1C"
+                : COLORS.mutedNavy,
+          }}
+        >
+          {message}
+        </p>
       )}
+
+      {txHash && (
+        <p style={{ ...smallTextStyle, marginTop: "0.3rem" }}>
+          View check-in tx:{" "}
+          <a
+            href={`https://sepolia.basescan.org/tx/${txHash}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {txHash.slice(0, 10)}…{txHash.slice(-6)}
+          </a>
+        </p>
+      )}
+
+      {/* <p style={{ ...smallTextStyle, marginTop: "0.75rem" }}>
+        <strong>Dev note:</strong> To create an event with a matching hash,
+        compute:
+        <code> keccak256(abi.encodePacked(code, salt)) </code> and pass that as{" "}
+        <code>attendanceCodeHash</code> when you call <code>createEvent</code>{" "}
+        from an admin wallet.
+      </p>
+
+      <p style={{ ...smallTextStyle, marginTop: "0.4rem" }}>
+        Current address:{" "}
+        <span style={{ fontFamily: "monospace" }}>
+          {currentAddress
+            ? `${currentAddress.slice(0, 6)}…${currentAddress.slice(-4)}`
+            : "not connected"}
+        </span>
+      </p> */}
     </section>
   );
 }
@@ -673,8 +873,8 @@ const primaryButtonStyle: React.CSSProperties = {
   borderRadius: "999px",
   border: `2px solid ${COLORS.brightBlue}`,
   fontWeight: 700,
-  background: COLORS.brightBlue,   
-  color: COLORS.navy, 
+  background: COLORS.brightBlue,
+  color: COLORS.navy,
   cursor: "pointer",
   whiteSpace: "nowrap",
 };
@@ -683,7 +883,7 @@ const pillButtonBlue: React.CSSProperties = {
   padding: "0.3rem 0.9rem",
   borderRadius: "999px",
   border: `2px solid ${COLORS.brightBlue}`,
-  background: COLORS.brightBlue, 
+  background: COLORS.brightBlue,
   color: COLORS.navy,
   fontSize: "0.8rem",
   cursor: "pointer",
@@ -701,11 +901,11 @@ const pillButtonYellow: React.CSSProperties = {
 
 const navLinkStyle: React.CSSProperties = {
   textDecoration: "none",
-  color: "#FFFFFF",           
+  color: "#FFFFFF",
   padding: "0.3rem 0.8rem",
   borderRadius: "999px",
   border: `1px solid ${COLORS.brightBlue}`,
-  background: COLORS.brightBlue,  
+  background: COLORS.brightBlue,
   cursor: "pointer",
   fontSize: "0.85rem",
 } as const;
