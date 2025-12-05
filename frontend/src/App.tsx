@@ -251,11 +251,6 @@ function AboutSection() {
         are allocated. Attendance can be logged on-chain so voting power can
         reflect real participation.
       </p>
-      <p style={{ ...bodyTextStyle, marginTop: "0.5rem" }}>
-        This front-end talks to the actual{" "}
-        <strong>ClubTreasuryUSDC</strong> contract on Base Sepolia. Deposits and
-        attendance check-ins from this UI appear on the block explorer.
-      </p>
     </section>
   );
 }
@@ -725,10 +720,6 @@ function AttendanceSection(props: {
     <section style={cardStyle} id="attendance">
       <h2 style={cardTitleStyle}>Attendance (on-chain)</h2>
 
-      <p style={bodyTextStyle}>
-        This form calls the <code>checkIn</code> function of the live
-        ClubTreasuryUSDC contract. You must:
-      </p>
       <ul
         style={{
           marginTop: "0.4rem",
@@ -817,7 +808,7 @@ function AttendanceSection(props: {
         </p>
       )}
 
-      <p style={{ ...smallTextStyle, marginTop: "0.75rem" }}>
+      {/* <p style={{ ...smallTextStyle, marginTop: "0.75rem" }}>
         <strong>Dev note:</strong> To create an event with a matching hash,
         compute:
         <code> keccak256(abi.encodePacked(code, salt)) </code> and pass that as{" "}
@@ -832,7 +823,7 @@ function AttendanceSection(props: {
             ? `${currentAddress.slice(0, 6)}…${currentAddress.slice(-4)}`
             : "not connected"}
         </span>
-      </p>
+      </p> */}
     </section>
   );
 }
