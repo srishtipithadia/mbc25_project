@@ -1,5 +1,19 @@
 # MBC25 Project
 
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Setup Instructions](#setup-instructions)
+  - [Step 1: Clone the Repository](#step-1-clone-the-repository)
+  - [Step 2: Install Dependencies (Root)](#step-2-install-dependencies-root)
+  - [Step 3: Configure Environment Variables (Root)](#step-3-configure-environment-variables-root)
+  - [Step 4: Compile Contracts (Optional)](#step-4-compile-contracts-optional)
+  - [Step 5: Deploy Contracts (Optional)](#step-5-deploy-contracts-optional)
+  - [Step 6: Install Frontend Dependencies](#step-6-install-frontend-dependencies)
+  - [Step 7: Configure Frontend Environment Variables](#step-7-configure-frontend-environment-variables)
+  - [Step 8: Run Development Server](#step-8-run-development-server)
+- [Quick Start Summary](#quick-start-summary)
+
 ## Prerequisites
 
 - Node.js (≥ 20.19, < 25) - We used Node 22
